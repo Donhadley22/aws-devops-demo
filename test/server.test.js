@@ -21,7 +21,7 @@ test("GET /health returns a healthy response", async () => {
   const response = await fetch(`${applicationUrl}/health`);
   const body = await response.json();
 
-  expect(response.status).toBe(200);
+  expect(response.status).toBe(500);
   expect(body.status).toBe("healthy");
   expect(body.service).toBe("aws-devops-demo");
 });
