@@ -1,0 +1,49 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 22
+    commands:
+      - echo "Installing declared dependencies"
+      - node --version
+      - npm --version
+      - npm ci
+
+  pre_build:
+    commands:
+      - echo "Running quality gates"
+      - npm run check
+      - npm test
+      - aws cloudformation validate-template --template-body file://infrastructure/main.yml > /dev/null
+
+  build:
+    commands:
+      - echo "Creating application artifact"
+      - npm run build
+      - echo "$CODEBUILD_RESOLVED_SOURCE_VERSION" > dist/commit-id.txt
+      - echo "$CODEBUILD_BUILD_NUMBER" > dist/build-number.txt
+
+  post_build:
+    commands:
+      - echo "Build completed at $(date -u)"
+
+reports:
+  unit-tests:
+    files:
+      - junit.xml
+    base-directory: reports
+    file-format: JUNITXML
+
+artifacts:
+  name: aws-devops-demo-$CODEBUILD_BUILD_NUMBER
+  files:
+    - "dist/**/*"
+  discard-paths: no
+
+cache:
+  paths:
+    - "/root/.npm/**/*"

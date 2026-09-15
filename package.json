@@ -1,0 +1,33 @@
+{
+  "name": "aws-devops-demo",
+  "version": "1.0.0",
+  "description": "Node.js AWS CodeBuild training application",
+  "private": true,
+  "main": "app/server.js",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "start": "node app/server.js",
+    "check": "node --check app/server.js && node --check test/server.test.js",
+    "test": "jest --runInBand",
+    "build": "node scripts/build.js"
+  },
+  "devDependencies": {
+    "jest": "^30.0.0",
+    "jest-junit": "^17.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "reporters": [
+      "default",
+      [
+        "jest-junit",
+        {
+          "outputDirectory": "reports",
+          "outputName": "junit.xml"
+        }
+      ]
+    ]
+  }
+}
