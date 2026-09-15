@@ -1,7 +1,8 @@
 node_modules/
 dist/
 reports/
+coverage/
 .env
 .env.*
-coverage/
+!.env.example
 *.log

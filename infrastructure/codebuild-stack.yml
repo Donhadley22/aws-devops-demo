@@ -1,0 +1,253 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Secure, standalone AWS CodeBuild lab infrastructure for aws-devops-demo.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: aws-devops-demo-build
+    MinLength: 2
+    MaxLength: 150
+    AllowedPattern: "^[A-Za-z0-9][A-Za-z0-9_-]+$"
+    Description: Name of the CodeBuild project.
+  GitHubRepositoryUrl:
+    Type: String
+    AllowedPattern: "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\\.git)?$"
+    Description: HTTPS clone URL for the GitHub repository.
+  GitHubBranch:
+    Type: String
+    Default: main
+    MinLength: 1
+    MaxLength: 255
+    AllowedPattern: "^[A-Za-z0-9._/-]+$"
+    Description: Branch used for manual builds and push webhook filtering.
+  CodeConnectionArn:
+    Type: String
+    AllowedPattern: "^arn:(aws|aws-us-gov|aws-cn):(codeconnections|codestar-connections):[a-z0-9-]+:[0-9]{12}:connection/[A-Za-z0-9-]+$"
+    Description: ARN of an already-authorized GitHub CodeConnections connection.
+  BuildImage:
+    Type: String
+    Default: aws/codebuild/standard:7.0
+    AllowedPattern: "^aws/codebuild/[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+$"
+    Description: AWS-managed Linux CodeBuild image with Node.js 22 support.
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+    AllowedValues:
+      - 1
+      - 3
+      - 5
+      - 7
+      - 14
+      - 30
+      - 60
+      - 90
+      - 120
+      - 150
+      - 180
+      - 365
+      - 400
+      - 545
+      - 731
+      - 1096
+      - 1827
+      - 2192
+      - 2557
+      - 2922
+      - 3288
+      - 3653
+    Description: CloudWatch Logs retention in days.
+
+Resources:
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Lab
+          Value: aws-devops-demo
+
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt ArtifactBucket.Arn
+              - !Sub "${ArtifactBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  BuildLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/codebuild/${ProjectName}"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Lab
+          Value: aws-devops-demo
+
+  TestReportGroup:
+    Type: AWS::CodeBuild::ReportGroup
+    Properties:
+      Name: !Sub "${ProjectName}-unit-tests"
+      Type: TEST
+      DeleteReports: true
+      ExportConfig:
+        ExportConfigType: NO_EXPORT
+      Tags:
+        - Key: Lab
+          Value: aws-devops-demo
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Least-privilege service role for the aws-devops-demo CodeBuild lab.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildLabAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteBuildLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "${BuildLogGroup.Arn}:*"
+              - Sid: ReadArtifactBucketConfiguration
+                Effect: Allow
+                Action:
+                  - s3:GetBucketAcl
+                  - s3:GetBucketLocation
+                Resource: !GetAtt ArtifactBucket.Arn
+              - Sid: WriteBuildArtifacts
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub "${ArtifactBucket.Arn}/artifacts/*"
+              - Sid: PublishTestReports
+                Effect: Allow
+                Action:
+                  - codebuild:CreateReportGroup
+                  - codebuild:CreateReport
+                  - codebuild:UpdateReport
+                  - codebuild:BatchPutTestCases
+                  - codebuild:BatchPutCodeCoverages
+                Resource: !GetAtt TestReportGroup.Arn
+              - Sid: ValidateApplicationTemplate
+                Effect: Allow
+                Action:
+                  - cloudformation:ValidateTemplate
+                Resource: "*"
+              - Sid: UseSpecificGitHubConnection
+                Effect: Allow
+                Action:
+                  - codeconnections:GetConnection
+                  - codeconnections:GetConnectionToken
+                Resource: !Ref CodeConnectionArn
+      Tags:
+        - Key: Lab
+          Value: aws-devops-demo
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Ref ProjectName
+      Description: Runs syntax checks, tests, CloudFormation validation, and packaging.
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Source:
+        Type: GITHUB
+        Location: !Ref GitHubRepositoryUrl
+        Auth:
+          Type: CODECONNECTIONS
+          Resource: !Ref CodeConnectionArn
+        BuildSpec: buildspec.yml
+        GitCloneDepth: 1
+        ReportBuildStatus: false
+      SourceVersion: !Ref GitHubBranch
+      Artifacts:
+        Type: S3
+        Location: !Ref ArtifactBucket
+        Name: placeholder.zip
+        NamespaceType: NONE
+        OverrideArtifactName: true
+        Packaging: ZIP
+        Path: artifacts
+      Cache:
+        Type: NO_CACHE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: !Ref BuildImage
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: false
+        EnvironmentVariables:
+          - Name: TEST_REPORT_GROUP_ARN
+            Type: PLAINTEXT
+            Value: !Ref TestReportGroup
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref BuildLogGroup
+          StreamName: !Ref ProjectName
+      TimeoutInMinutes: 20
+      QueuedTimeoutInMinutes: 30
+      Visibility: PRIVATE
+      Triggers:
+        Webhook: true
+        BuildType: BUILD
+        FilterGroups:
+          - - Type: EVENT
+              Pattern: PUSH
+            - Type: HEAD_REF
+              Pattern: !Sub "^refs/heads/${GitHubBranch}$"
+          - - Type: EVENT
+              Pattern: PULL_REQUEST_CREATED,PULL_REQUEST_UPDATED,PULL_REQUEST_REOPENED
+            - Type: BASE_REF
+              Pattern: !Sub "^refs/heads/${GitHubBranch}$"
+      Tags:
+        - Key: Lab
+          Value: aws-devops-demo
+
+Outputs:
+  CodeBuildProjectName:
+    Description: Name of the CodeBuild project.
+    Value: !Ref CodeBuildProject
+  ArtifactBucketName:
+    Description: Name of the versioned S3 artifact bucket.
+    Value: !Ref ArtifactBucket
+  BuildLogGroupName:
+    Description: CloudWatch Logs group used by CodeBuild.
+    Value: !Ref BuildLogGroup
+  CodeBuildServiceRoleArn:
+    Description: ARN of the CodeBuild service role.
+    Value: !GetAtt CodeBuildServiceRole.Arn
+  TestReportGroupArn:
+    Description: ARN of the CodeBuild test report group.
+    Value: !Ref TestReportGroup

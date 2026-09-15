@@ -5,41 +5,50 @@ env:
 
 phases:
   install:
+    on-failure: ABORT
     runtime-versions:
       nodejs: 22
     commands:
-      - echo "Installing declared dependencies"
+      - echo "[install] Installing dependencies from package-lock.json"
       - node --version
       - npm --version
       - npm ci
 
   pre_build:
+    on-failure: ABORT
     commands:
-      - echo "Running quality gates"
+      - echo "[pre_build] Running JavaScript syntax checks"
       - npm run check
+      - echo "[pre_build] Running Jest tests"
       - npm test
-      - aws cloudformation validate-template --template-body file://infrastructure/main.yml > /dev/null
+      - echo "[pre_build] Validating infrastructure/application.yml"
+      - aws cloudformation validate-template --template-body file://infrastructure/application.yml > /dev/null
+      - echo "[pre_build] All quality gates passed"
 
   build:
+    on-failure: ABORT
     commands:
-      - echo "Creating application artifact"
+      - echo "[build] Creating the application artifact"
       - npm run build
-      - echo "$CODEBUILD_RESOLVED_SOURCE_VERSION" > dist/commit-id.txt
-      - echo "$CODEBUILD_BUILD_NUMBER" > dist/build-number.txt
+      - printf '%s\n' "${CODEBUILD_RESOLVED_SOURCE_VERSION:-unknown}" > dist/commit-id.txt
+      - printf '%s\n' "${CODEBUILD_BUILD_NUMBER:-unknown}" > dist/build-number.txt
+      - echo "[build] Recorded source commit and CodeBuild build number"
 
   post_build:
+    on-failure: ABORT
     commands:
-      - echo "Build completed at $(date -u)"
+      - echo "[post_build] Build completed at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      - echo "[post_build] Artifact upload follows this phase"
 
 reports:
-  unit-tests:
+  $TEST_REPORT_GROUP_ARN:
     files:
       - junit.xml
     base-directory: reports
     file-format: JUNITXML
 
 artifacts:
-  name: aws-devops-demo-$CODEBUILD_BUILD_NUMBER
+  name: builds/$CODEBUILD_BUILD_NUMBER/aws-devops-demo-$CODEBUILD_RESOLVED_SOURCE_VERSION.zip
   files:
     - "dist/**/*"
   discard-paths: no

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node app/server.js",
-    "check": "node --check app/server.js && node --check test/server.test.js",
+    "check": "node --check app/server.js && node --check test/server.test.js && node --check scripts/build.js && node --check scripts/set-test-result.js",
     "test": "jest --runInBand",
     "build": "node scripts/build.js"
   },
@@ -19,6 +19,9 @@
   },
   "jest": {
     "testEnvironment": "node",
+    "modulePathIgnorePatterns": [
+      "<rootDir>/dist/"
+    ],
     "reporters": [
       "default",
       [
